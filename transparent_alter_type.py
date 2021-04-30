@@ -23,6 +23,7 @@ arg_parser.add_argument('-c', '--column', action='append', help='column:new_type
 arg_parser.add_argument('-j', '--jobs', type=int, required=True)
 arg_parser.add_argument('--cleanup', action='store_true')
 arg_parser.add_argument('--lock-timeout', type=int, default=5)
+arg_parser.add_argument('--time-between-locks', type=int, default=10)
 arg_parser.add_argument('--work-mem', type=str, default='1GB')
 arg_parser.add_argument('--min-delta-rows', type=int, default=10000)
 arg_parser.add_argument('--show-queries', action='store_true')
@@ -41,6 +42,7 @@ class TAT:
         self.table_name = args.table_name
         self.jobs = args.jobs
         self.lock_timeout = '%ss' % args.lock_timeout
+        self.time_between_locks = args.time_between_locks
         self.work_mem = args.work_mem
         self.is_cleanup = args.cleanup
         self.show_queries = args.show_queries
@@ -95,6 +97,10 @@ class TAT:
 
     def commit(self):
         self.main_connect.commit()
+        self.main_cursor.close()
+
+    def rollback(self):
+        self.main_connect.rollback()
         self.main_cursor.close()
 
     def duration(self, interval):
@@ -474,6 +480,20 @@ class TAT:
         self.commit()
         print('done in', self.duration(time.time() - start_time))
 
+    def exclusive_lock_table(self):
+        self.start_transaction()
+        self.cancel_autovacuum()
+        print('    lock table %(name)s ...' % self.table, end='')
+        sys.stdout.flush()
+        try:
+            self.execute('lock table %(name)s in access exclusive mode' % self.table)
+        except psycopg2.errors.LockNotAvailable as e:
+            self.rollback()
+            print('failed:', e)
+            return False
+        print('done')
+        return True
+
     def switch_table(self):
         print('  switch table start:')
 
@@ -486,7 +506,11 @@ class TAT:
 
         while True:
             if self.pgbouncer_pause():
-                break
+                if self.exclusive_lock_table():
+                    break
+                else:
+                    self.pgbouncer_resume()
+                    time.sleep(self.time_between_locks)
             else:
                 time.sleep(self.pgbouncer_time_between_pause)
 
@@ -495,12 +519,6 @@ class TAT:
             self.commit()
 
         try:
-            self.start_transaction()
-            print('    lock table %(name)s ...' % self.table, end='')
-            sys.stdout.flush()
-            self.cancel_autovacuum()
-            self.execute('lock table %(name)s in access exclusive mode' % self.table)
-            print('done')
             self.apply_delta()
             self.execute('\n'.join(self.table['drop_functions']))
             self.execute('\n'.join(self.table['drop_views']))
@@ -546,7 +564,7 @@ class TAT:
         while self.break_pause_loop and time.time() - start_time < self.pgbouncer_pause_timeout:
             time.sleep(.01)
         if self.break_pause_loop:
-            print('cancel pause')
+            print('    pgbouncer pause timeout: cancel pause')
             self.pause_canceled = True
             self.pgbouncer_connect.cancel()
 
@@ -563,12 +581,12 @@ class TAT:
         try:
             self.pgbouncer_connect.cursor().execute('pause')
         except psycopg2.DatabaseError as e:
-            print('pause failed: %s: %s' % (e.__class__.__name__, e.message))
+            print('    pause failed: %s: %s' % (e.__class__.__name__, e))
             if self.pause_canceled:
-                print('reconnect to pgbouncer')
+                print('    reconnect to pgbouncer')
                 self.pgbouncer_connect.close()
                 self.pgbouncer_connect = self.autocommit_pgbouncer_connect()
-            if e.message == 'already suspended/paused\n':
+            if str(e) == 'already suspended/paused\n':
                 print('    pgbouncer paused !!!')
                 return True
             return False
@@ -585,7 +603,7 @@ class TAT:
         try:
             self.pgbouncer_connect.cursor().execute('resume')
         except psycopg2.DatabaseError as e:
-            print('resume failed: %s: %s' % (e.__class__.__name__, e.message))
+            print('resume failed: %s: %s' % (e.__class__.__name__, e))
 
     def cleanup(self):
         self.start_transaction()
