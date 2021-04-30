@@ -1,5 +1,4 @@
-#!/usr/bin/python2.7
-# -*- coding:utf-8 -*-
+#!/usr/bin/python3
 
 import sys
 import re
@@ -9,7 +8,7 @@ from select import select
 import psycopg2.extras
 from psycopg2.extensions import POLL_OK, POLL_READ, POLL_WRITE
 import threading
-import Queue
+import queue
 import time
 import signal
 import datetime
@@ -84,7 +83,7 @@ class TAT:
 
     def execute(self, query, *params):
         if self.show_queries:
-            print '\nQUERY: ', query
+            print('\nQUERY: ', query)
         if not query:
             return
         if not params:
@@ -107,7 +106,7 @@ class TAT:
                             where state = 'active' and
                                   backend_type = 'autovacuum worker' and
                                   query ~ '%(name)s'; ''' % self.table):
-            print 'autovacuum canceled'
+            print('autovacuum canceled')
 
 
     def get_table_info(self):
@@ -279,8 +278,8 @@ class TAT:
     def create_table_new(self):
         self.start_transaction()
 
-        print '%(name)s (%(pretty_size)s):' % self.table
-        print '  create %(name)s__tat_new ...' % self.table,
+        print('%(name)s (%(pretty_size)s):' % self.table)
+        print('  create %(name)s__tat_new ...' % self.table, end='')
         sys.stdout.flush()
 
         self.execute('''
@@ -308,10 +307,10 @@ class TAT:
             alter table %(name)s__tat_new set (autovacuum_enabled = false);''' % self.table)
 
         self.commit()
-        print 'done'
+        print('done')
 
     def create_table_delta(self):
-        print '  create %(name)s__tat_delta ...' % self.table,
+        print('  create %(name)s__tat_delta ...' % self.table, end='')
         sys.stdout.flush()
         self.start_transaction()
 
@@ -394,42 +393,42 @@ class TAT:
                           after insert or delete or update on %(name)s
                           for each row execute procedure "%(name)s__tat_delta"();''' % self.table)
         self.commit()
-        print 'done'
+        print('done')
 
     def copy_data(self):
         start_time = time.time()
-        print '  copy data (%(pretty_data_size)s) ...' % self.table,
+        print('  copy data (%(pretty_data_size)s) ...' % self.table, end='')
         sys.stdout.flush()
         self.start_transaction()
         self.execute('insert into %(name)s__tat_new select * from %(name)s' % self.table)
         self.commit()
-        print 'done in', self.duration(time.time() - start_time)
+        print('done in', self.duration(time.time() - start_time))
         sys.stdout.flush()
 
     def create_indexes(self):
         start_time = time.time()
-        print '  create %s indexes on %s jobs:' % (len(self.table['create_indexes']), self.jobs)
+        print('  create %s indexes on %s jobs:' % (len(self.table['create_indexes']), self.jobs))
         if not self.table['create_indexes']:
-            print '    no indexes'
+            print('    no indexes')
             return
 
         self.exception_on_create_index = False
-        self.output_queue = Queue.Queue()
+        self.output_queue = queue.Queue()
 
-        self.workers = [threading.Thread(target=self.create_index) for i in xrange(self.jobs)]
+        self.workers = [threading.Thread(target=self.create_index) for i in range(self.jobs)]
         for w in self.workers:
             w.start()
 
         while threading.active_count() > 1:
             time.sleep(0.5)
             if not self.output_queue.empty():
-                print self.output_queue.get()
+                print(self.output_queue.get())
         while not self.output_queue.empty():
-            print self.output_queue.get()
+            print(self.output_queue.get())
 
         if self.exception_on_create_index:
             raise Exception('exception on create index')
-        print '  create_indexes done in', self.duration(time.time() - start_time)
+        print('  create_indexes done in', self.duration(time.time() - start_time))
 
     def get_next_index(self):
         try:
@@ -458,25 +457,25 @@ class TAT:
 
     def apply_delta(self):
         start_time = time.time()
-        print '    apply_delta ...',
+        print('    apply_delta ...', end='')
         sys.stdout.flush()
         rows = self.execute('select "%(name)s__apply_delta"() as rows;' % self.table)[0]['rows']
 
-        print rows, 'rows done in', self.duration(time.time() - start_time)
+        print(rows, 'rows done in', self.duration(time.time() - start_time))
         return rows
 
     def analyze(self):
         start_time = time.time()
-        print '  analyze ...',
+        print('  analyze ...', end='')
         sys.stdout.flush()
 
         self.start_transaction()
         self.execute('analyze %(name)s__tat_new' % self.table)
         self.commit()
-        print 'done in', self.duration(time.time() - start_time)
+        print('done in', self.duration(time.time() - start_time))
 
     def switch_table(self):
-        print '  switch table start:'
+        print('  switch table start:')
 
         while True:
             self.start_transaction()
@@ -497,22 +496,22 @@ class TAT:
 
         try:
             self.start_transaction()
-            print '    lock table %(name)s ...' % self.table,
+            print('    lock table %(name)s ...' % self.table, end='')
             sys.stdout.flush()
             self.cancel_autovacuum()
             self.execute('lock table %(name)s in access exclusive mode' % self.table)
-            print 'done'
+            print('done')
             self.apply_delta()
             self.execute('\n'.join(self.table['drop_functions']))
             self.execute('\n'.join(self.table['drop_views']))
             self.execute('\n'.join(self.table['drop_constraints']))
             self.execute('\n'.join(self.table['alter_sequences']))
-            print '    drop table %(name)s' % self.table
+            print('    drop table %(name)s' % self.table)
             self.execute('drop table %(name)s;' % self.table)
             self.execute('drop function "%(name)s__tat_delta"();' % self.table)
             self.execute('drop function "%(name)s__apply_delta"();' % self.table)
             self.execute('drop table %(name)s__tat_delta;' % self.table)
-            print '    rename table %(name)s__tat_new -> %(name)s' % self.table
+            print('    rename table %(name)s__tat_new -> %(name)s' % self.table)
             self.execute('alter table %(name)s__tat_new rename to %(name_without_schema)s;' % self.table)
             self.execute('\n'.join(self.table['rename_indexes']))
             self.execute('\n'.join(self.table['create_constraints']))
@@ -525,36 +524,36 @@ class TAT:
         except Exception as e:
             self.pgbouncer_resume()
             raise e
-        print '  switch table done'
+        print('  switch table done')
 
     def validate_constraints(self):
         if not self.table['validate_constraints']:
             return
         start_time = time.time()
-        print '  validate %s constraints:' % len(self.table['validate_constraints'])
+        print('  validate %s constraints:' % len(self.table['validate_constraints']))
         for c in self.table['validate_constraints']:
             loop_start_time = time.time()
-            print '   ', re.sub('alter table (.*) validate constraint (.*);', '\\1: \\2', c), '...',
+            print('   ', re.sub('alter table (.*) validate constraint (.*);', '\\1: \\2', c), '...', end='')
             sys.stdout.flush()
             self.start_transaction()
             self.execute(c)
             self.commit()
-            print 'done in', self.duration(time.time() - loop_start_time)
-        print '  validate constraints done in', self.duration(time.time() - start_time)
+            print('done in', self.duration(time.time() - loop_start_time))
+        print('  validate constraints done in', self.duration(time.time() - start_time))
 
     def break_pgbouncer_pause(self):
         start_time = time.time()
         while self.break_pause_loop and time.time() - start_time < self.pgbouncer_pause_timeout:
             time.sleep(.01)
         if self.break_pause_loop:
-            print 'cancel pause'
+            print('cancel pause')
             self.pause_canceled = True
             self.pgbouncer_connect.cancel()
 
     def pgbouncer_pause(self):
         if not self.pgbouncer_connect:
             return True
-        print '    try pgbouncer pause'
+        print('    try pgbouncer pause')
         self.break_pause_loop = True
         self.pause_canceled = False
 
@@ -564,29 +563,29 @@ class TAT:
         try:
             self.pgbouncer_connect.cursor().execute('pause')
         except psycopg2.DatabaseError as e:
-            print 'pause failed: %s: %s' % (e.__class__.__name__, e.message)
+            print('pause failed: %s: %s' % (e.__class__.__name__, e.message))
             if self.pause_canceled:
-                print 'reconnect to pgbouncer'
+                print('reconnect to pgbouncer')
                 self.pgbouncer_connect.close()
                 self.pgbouncer_connect = self.autocommit_pgbouncer_connect()
             if e.message == 'already suspended/paused\n':
-                print '    pgbouncer paused !!!'
+                print('    pgbouncer paused !!!')
                 return True
             return False
         finally:
             self.break_pause_loop = False
             t.join()
-        print '    pgbouncer paused !!!'
+        print('    pgbouncer paused !!!')
         return True
 
     def pgbouncer_resume(self):
         if not self.pgbouncer_connect:
             return
-        print '    pgbouncer resume'
+        print('    pgbouncer resume')
         try:
             self.pgbouncer_connect.cursor().execute('resume')
         except psycopg2.DatabaseError as e:
-            print 'resume failed: %s: %s' % (e.__class__.__name__, e.message)
+            print('resume failed: %s: %s' % (e.__class__.__name__, e.message))
 
     def cleanup(self):
         self.start_transaction()
@@ -613,8 +612,8 @@ class TAT:
         self.switch_table()
         self.validate_constraints()
 
-        print self.table['name'], 'done in', self.duration(time.time() - start_time)
-        print
+        print(self.table['name'], 'done in', self.duration(time.time() - start_time))
+        print()
 
 def wait_select_inter(conn):
     while 1:
