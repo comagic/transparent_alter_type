@@ -11,15 +11,18 @@ git clone git@github.com:comagic/transparent_alter_type.git
 
 * python3
 * psycopg2
+* pg_export
 
 # Usage
 
-    transparent_alter_type.py [--help] -h HOST -p PORT -d DBNAME -t
-                              TABLE_NAME [-c COLUMN] -j JOBS [--cleanup]
+    transparent_alter_type.py [--help] -h HOST -p PORT -d DBNAME -t TABLE_NAME
+                              [-c COLUMN] -j JOBS [--force] [--cleanup]
                               [--lock-timeout LOCK_TIMEOUT]
+                              [--time-between-locks TIME_BETWEEN_LOCKS]
                               [--work-mem WORK_MEM]
                               [--min-delta-rows MIN_DELTA_ROWS]
                               [--show-queries]
+                              [--skip-fk-validation]
                               [--pgbouncer-host PGBOUNCER_HOST]
                               [--pgbouncer-port PGBOUNCER_PORT]
                               [--pgbouncer-pause-timeout PGBOUNCER_PAUSE_TIMEOUT]
