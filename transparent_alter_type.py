@@ -487,7 +487,7 @@ class TAT:
         sys.stdout.flush()
         try:
             self.execute('lock table %(name)s in access exclusive mode' % self.table)
-        except psycopg2.errors.LockNotAvailable as e:
+        except (psycopg2.errors.LockNotAvailable, psycopg2.errors.DeadlockDetected) as e:
             self.rollback()
             print('failed:', e)
             return False
