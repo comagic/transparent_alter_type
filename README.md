@@ -9,7 +9,7 @@ git clone git@git.dev.uiscom.ru:tools/transparent_alter_type.git
 
 # Dependency
 
-* python2.7
+* python3
 * psycopg2
 
 # Usage
