@@ -5,7 +5,7 @@ transparent_alter_type - tools for alter type of columns without locks.
 
 # Installation
 
-git clone git@git.dev.uiscom.ru:tools/transparent_alter_type.git
+git clone git@github.com:comagic/transparent_alter_type.git
 
 # Dependency
 
