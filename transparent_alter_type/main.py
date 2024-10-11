@@ -3,7 +3,7 @@ import psycopg2
 from select import select
 import psycopg2.extras
 from psycopg2.extensions import POLL_OK, POLL_READ, POLL_WRITE
-from tat import TAT
+from .tat import TAT
 
 
 def wait_select_inter(conn):
