@@ -15,7 +15,8 @@ class TAT:
         self.host = args.host
         self.port = args.port
         self.dbname = args.dbname
-        self.table_name = args.table_name
+        self.args_table_name = args.table_name
+        self.table_name = None
         self.jobs = args.jobs
         self.lock_timeout = f'{args.lock_timeout}s'
         self.time_between_locks = args.time_between_locks
@@ -85,11 +86,11 @@ class TAT:
         return str(datetime.timedelta(seconds=int(interval)))
 
     def cancel_autovacuum(self):
-        if self.execute('''select pg_cancel_backend(pid)
-                             from pg_stat_activity
-                            where state = 'active' and
-                                  backend_type = 'autovacuum worker' and
-                                  query ~ '%(name)s'; ''' % self.table):
+        if self.execute(f'''select pg_cancel_backend(pid)
+                              from pg_stat_activity
+                             where state = 'active' and
+                                   backend_type = 'autovacuum worker' and
+                                   query ~ '{self.table_name}';'''):
             print('autovacuum canceled')
 
     def cancel_all_autovacuum(self):
@@ -107,111 +108,133 @@ class TAT:
     def get_table_info(self):
         query = self.get_query('get_table_info.sql')
         self.start_transaction()
-        res = self.execute(query, self.table_name)
+        res = self.execute(query, self.args_table_name)
 
         if not res:
             raise Exception('table not found')
 
-        if not res[0]['pk_columns']:
-            raise Exception('table %(name)s does not have primary key or not null unique constraint' % res[0])
+        self.table = res[0]
+        self.table_name = self.table['name']
+
+        if not self.table['pk_columns']:
+            raise Exception(f'table {self.args_table_name} does not have primary key or not null unique constraint')
 
         if not self.is_force:
             columns_to_alter = []
             for column in self.columns:
                 pg_type = self.execute('select %s::regtype as mnemonic', column['type'])[0]['mnemonic']
-                if res[0]['column_types'][column['column']] == pg_type:
-                    print('column %s.%s has already type %s' % (self.table_name, column['column'], pg_type))
+                if self.table['column_types'][column['column']] == pg_type:
+                    print(f'column {self.args_table_name}.{column["column"]} has already type {pg_type}')
                 else:
                     columns_to_alter.append(column)
             if len(columns_to_alter) == 0:
                 print('no column to alter, use --force to alter anyway')
                 sys.exit(0)
-            columns = columns_to_alter
-
-        self.table = res[0]
+            columns = columns_to_alter  # FIXME
 
     def create_table_new(self):
         self.start_transaction()
 
-        print('%(name)s (%(pretty_size)s):' % self.table)
-        print('  create %(name)s__tat_new ...' % self.table, end='')
+        print('{name} ({pretty_size}):'.format(**self.table))
+        print(f'  create {self.table_name}__tat_new')
         sys.stdout.flush()
 
-        self.execute('''
-            create table %(name)s__tat_new(
-              like %(name)s
+        self.execute(f'''
+            create table {self.table_name}__tat_new(
+              like {self.table_name}
               including all
               excluding indexes
               excluding constraints
-              excluding statistics)''' % self.table)
+              excluding statistics);
+        ''')
 
         if self.columns:
-            self.execute(''.join('''
-                alter table %(name)s__tat_new
-                  alter column %(column)s
-                    type %(type)s using (%(column)s::%(type)s);''' %
-                dict(self.table, **c)
-                for c in self.columns))
+            self.execute(
+                ''.join(
+                    '''
+                    alter table {name}__tat_new
+                      alter column {column}
+                        type {type} using ({column}::{type});
+                    '''.format(**self.table, **column)
+                    for column in self.columns
+                )
+            )
 
         self.execute('\n'.join(self.table['create_check_constraints']))
         self.execute('\n'.join(self.table['grant_privileges']))
         self.execute(self.table['comment'])
         self.cancel_autovacuum()
-        self.execute('''
-            alter table %(name)s          set (autovacuum_enabled = false);
-            alter table %(name)s__tat_new set (autovacuum_enabled = false);''' % self.table)
+        self.execute(f'''
+            alter table {self.table_name}          set (autovacuum_enabled = false);
+            alter table {self.table_name}__tat_new set (autovacuum_enabled = false);
+        ''')
 
         self.commit()
-        print('done')
 
     def create_table_delta(self):
-        print('  create %(name)s__tat_delta ...' % self.table, end='')
+        print(f'  create {self.table_name}__tat_delta')
         sys.stdout.flush()
         self.start_transaction()
 
-        self.execute('''
-            create unlogged table %(name)s__tat_delta(
-              like %(name)s excluding all)''' % self.table)
+        self.execute(f'''
+            create unlogged table {self.table_name}__tat_delta(
+              like {self.table_name} excluding all)
+        ''')
 
-        self.execute('''alter table %(name)s__tat_delta add column tat_delta_id serial;
-                        alter table %(name)s__tat_delta add column tat_delta_op "char";''' % self.table)
+        self.execute(f'''
+            alter table {self.table_name}__tat_delta add column tat_delta_id serial;
+            alter table {self.table_name}__tat_delta add column tat_delta_op "char";
+        ''')
 
         function_body = self.get_query('store_delta.plpgsql')
-        self.execute(function_body % self.table)
+        self.execute(function_body.format(**self.table))
 
-        columns = ', '.join('"%s"' % c
-                                for c in self.table['all_columns'])
-        val_columns = ', '.join('r."%s"' % c
-                                for c in self.table['all_columns'])
-        where = ' and '.join('t."%s" = r."%s"' % (c, c)
-                             for c in self.table['pk_columns'])
-        set_columns = ','.join('"%s" = r."%s"' % (c, c)
-                               for c in self.table['all_columns']
-                               if c not in self.table['pk_columns'])
+        columns = ', '.join(
+            f'"{column}"'
+            for column in self.table['all_columns']
+        )
+        val_columns = ', '.join(
+            f'r."{column}"'
+            for column in self.table['all_columns']
+        )
+        where = ' and '.join(
+            f't."{column}" = r."{column}"'
+            for column in self.table['pk_columns']
+        )
+        set_columns = ','.join(
+            f'"{column}" = r."{column}"'
+            for column in self.table['all_columns']
+            if column not in self.table['pk_columns']
+        )
 
         function_body = self.get_query('apply_delta.plpgsql')
-        self.execute(function_body % dict(self.table, **locals()))
+        self.execute(function_body.format(**self.table, **locals()))
 
         self.cancel_autovacuum()
-        self.execute('''create trigger store__tat_delta
-                          after insert or delete or update on %(name)s
-                          for each row execute procedure "%(name)s__store_delta"();''' % self.table)
+        self.execute(f'''
+            create trigger store__tat_delta
+              after insert or delete or update on {self.table_name}
+              for each row execute procedure "{self.table_name}__store_delta"();
+        ''')
         self.commit()
-        print('done')
 
     def copy_data(self):
         start_time = time.time()
-        print('  copy data (%(pretty_data_size)s) ...' % self.table, end='')
+        print(f'  copy data ({self.table["pretty_data_size"]})... ', end='')
         sys.stdout.flush()
         self.start_transaction()
-        self.execute('insert into %(name)s__tat_new select * from %(name)s' % self.table)
+        self.execute(f'''
+            insert into {self.table_name}__tat_new
+              select * from {self.table_name}
+        ''')
         self.commit()
         print('done in', self.duration(time.time() - start_time))
         sys.stdout.flush()
 
     def create_indexes(self):
         start_time = time.time()
-        print('  create %s indexes on %s jobs:' % (len(self.table['create_indexes']), self.jobs))
+        index_count = len(self.table['create_indexes'])
+        print(f'  create {index_count} indexes on {self.jobs} jobs:')
         if not self.table['create_indexes']:
             print('    no indexes')
             return
@@ -249,42 +272,42 @@ class TAT:
                 if not index_def:
                     break
                 index_name = re.sub('CREATE U?N?I?Q?U?E? ?INDEX (.*) ON .*', '\\1', index_def)
-                self.output_queue.put('    start %s' % index_name)
+                self.output_queue.put(f'    start {index_name}')
                 cursor = connect.cursor()
                 cursor.execute(index_def)
                 connect.commit()
                 cursor.close()
-                self.output_queue.put('    done %s in %s' % (index_name, self.duration(time.time() - start_time)))
+                duration = self.duration(time.time() - start_time)
+                self.output_queue.put(f'    done {index_name} in {duration}')
         except Exception as e:
             self.exception_on_create_index = True
             raise e
 
     def apply_delta(self):
         start_time = time.time()
-        print('    apply_delta ...', end='')
+        print('    apply_delta... ', end='')
         sys.stdout.flush()
-        rows = self.execute('select "%(name)s__apply_delta"() as rows;' % self.table)[0]['rows']
-
+        rows = self.execute(f'select "{self.table_name}__apply_delta"() as rows;')[0]['rows']
         print(rows, 'rows done in', self.duration(time.time() - start_time))
         return rows
 
     def analyze(self):
         start_time = time.time()
-        print('  analyze ...', end='')
+        print('  analyze... ', end='')
         sys.stdout.flush()
 
         self.start_transaction()
-        self.execute('analyze %(name)s__tat_new' % self.table)
+        self.execute(f'analyze {self.table_name}__tat_new')
         self.commit()
         print('done in', self.duration(time.time() - start_time))
 
     def exclusive_lock_table(self):
         self.start_transaction()
         self.cancel_autovacuum()
-        print('    lock table %(name)s ...' % self.table, end='')
+        print(f'    lock table {self.table_name}... ', end='')
         sys.stdout.flush()
         try:
-            self.execute('lock table %(name)s in access exclusive mode' % self.table)
+            self.execute(f'lock table {self.table_name} in access exclusive mode')
         except (psycopg2.errors.LockNotAvailable, psycopg2.errors.DeadlockDetected) as e:
             self.rollback()
             print('failed:', e)
@@ -293,7 +316,7 @@ class TAT:
         return True
 
     def restore_storage_parameters(self):
-        self.execute('alter table %(name)s reset (autovacuum_enabled);' % self.table)
+        self.execute(f'alter table {self.table_name} reset (autovacuum_enabled);')
         self.execute('\n'.join(self.table['storage_parameters']))
 
     def switch_table(self):
@@ -327,13 +350,13 @@ class TAT:
             self.execute('\n'.join(self.table['drop_views']))
             self.execute('\n'.join(self.table['drop_constraints']))
             self.execute('\n'.join(self.table['alter_sequences']))
-            print('    drop table %(name)s' % self.table)
-            self.execute('drop table %(name)s;' % self.table)
-            self.execute('drop function "%(name)s__store_delta"();' % self.table)
-            self.execute('drop function "%(name)s__apply_delta"();' % self.table)
-            self.execute('drop table %(name)s__tat_delta;' % self.table)
-            print('    rename table %(name)s__tat_new -> %(name)s' % self.table)
-            self.execute('alter table %(name)s__tat_new rename to %(name_without_schema)s;' % self.table)
+            print(f'    drop table {self.table_name}')
+            self.execute(f'drop table {self.table_name};')
+            self.execute(f'drop function "{self.table_name}__store_delta"();')
+            self.execute(f'drop function "{self.table_name}__apply_delta"();')
+            self.execute(f'drop table {self.table_name}__tat_delta;')
+            print(f'    rename table {self.table_name}__tat_new -> {self.table_name}')
+            self.execute(f'alter table {self.table_name}__tat_new rename to {self.table["name_without_schema"]};')
             self.execute('\n'.join(self.table['rename_indexes']))
             self.execute('\n'.join(self.table['create_constraints']))
             self.execute('\n'.join(self.table['create_triggers']))
@@ -360,7 +383,8 @@ class TAT:
         if not self.table['validate_constraints']:
             return
         start_time = time.time()
-        print('  validate %s constraints:' % len(self.table['validate_constraints']))
+        constraints_count = len(self.table["validate_constraints"])
+        print(f'  validate {constraints_count} constraints:')
         for c in self.table['validate_constraints']:
             loop_start_time = time.time()
             print('   ', re.sub('alter table (.*) validate constraint (.*);', '\\1: \\2', c), '...', end='')
@@ -393,7 +417,7 @@ class TAT:
         try:
             self.pgbouncer_connect.cursor().execute('pause')
         except psycopg2.DatabaseError as e:
-            print('    pause failed: %s: %s' % (e.__class__.__name__, e))
+            print(f'    pause failed: {e.__class__.__name__}: {str(e)}')
             if self.pause_canceled:
                 print('    reconnect to pgbouncer')
                 self.pgbouncer_connect.close()
@@ -415,15 +439,15 @@ class TAT:
         try:
             self.pgbouncer_connect.cursor().execute('resume')
         except psycopg2.DatabaseError as e:
-            print('resume failed: %s: %s' % (e.__class__.__name__, e))
+            print(f'resume failed: {e.__class__.__name__}: {str(e)}')
 
     def cleanup(self):
         self.start_transaction()
-        self.execute('drop trigger if exists store__tat_delta on %(name)s;' % self.table)
-        self.execute('drop function if exists "%(name)s__store_delta"();' % self.table)
-        self.execute('drop function if exists "%(name)s__apply_delta"();' % self.table)
-        self.execute('drop table if exists %(name)s__tat_delta;' % self.table)
-        self.execute('drop table if exists %(name)s__tat_new;' % self.table)
+        self.execute(f'drop trigger if exists store__tat_delta on {self.table_name};')
+        self.execute(f'drop function if exists "{self.table_name}__store_delta"();')
+        self.execute(f'drop function if exists "{self.table_name}__apply_delta"();')
+        self.execute(f'drop table if exists {self.table_name}__tat_delta;')
+        self.execute(f'drop table if exists {self.table_name}__tat_new;')
         self.commit()
 
     def run(self):
