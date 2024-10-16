@@ -25,7 +25,7 @@ select tn.table_name as name,
        sp.storage_parameters
   from pg_class t
  cross join lateral (select t.oid::regclass::text as table_name) tn
-  left join lateral (select format('comment on table %%s__tat_new is %%L;',
+  left join lateral (select format('comment on table %s__tat_new is %L;',
                                    tn.table_name,
                                    d.description) as comment
                        from pg_description d
@@ -40,7 +40,7 @@ select tn.table_name as name,
                                                        '__tat_new USING ')
                                                order by cardinality(i.indkey) desc),
                                      '{}') as create_indexes,
-                            coalesce(array_agg(format('alter index %%s.%%s rename to %%s;',
+                            coalesce(array_agg(format('alter index %s.%s rename to %s;',
                                                       icn.nspname,
                                                       (ic.relname || '__tat_new')::name,
                                                       ic.relname)),
@@ -51,7 +51,7 @@ select tn.table_name as name,
                       inner join pg_namespace icn
                               on icn.oid = ic.relnamespace
                       where i.indrelid = t.oid and
-                            ic.relname not like '%%\_tat') i
+                            ic.relname not like '%\_tat') i
   left join lateral (select uni.contype,
                             array_agg(a.attname order by a.attnum) filter (where a.attnotnull) as pk_columns,
                             count(1)
@@ -66,7 +66,7 @@ select tn.table_name as name,
                       order by 3
                       limit 1) as pk on true
  cross join lateral (select coalesce(array_agg(format(
-                                                 'alter table %%s add constraint %%s %%s using index %%s %%s %%s;',
+                                                 'alter table %s add constraint %s %s using index %s %s %s;',
                                                  tn.table_name,
                                                  uni.conname,
                                                  case
@@ -87,7 +87,7 @@ select tn.table_name as name,
                        from pg_constraint uni
                       where uni.conrelid = t.oid and
                             uni.contype in ('p', 'u')) uni
- cross join lateral (select coalesce(array_agg(format('alter table %%s__tat_new add constraint %%s %%s;',
+ cross join lateral (select coalesce(array_agg(format('alter table %s__tat_new add constraint %s %s;',
                                                       tn.table_name,
                                                       chk.conname,
                                                       pg_get_constraintdef(chk.oid))),
@@ -95,17 +95,17 @@ select tn.table_name as name,
                        from pg_constraint chk
                       where chk.conrelid = t.oid and
                             chk.contype = 'c' and
-                            chk.conname not like '%%\_tat') chk
- cross join lateral (select coalesce(array_agg(format('alter table %%s add constraint %%s %%s not valid;',
+                            chk.conname not like '%\_tat') chk
+ cross join lateral (select coalesce(array_agg(format('alter table %s add constraint %s %s not valid;',
                                                       fk.conrelid::regclass::text,
                                                       fk.conname,
                                                       pg_get_constraintdef(fk.oid))),
                                      '{}') as create_constraints,
-                            coalesce(array_agg(format('alter table %%s validate constraint %%s;',
+                            coalesce(array_agg(format('alter table %s validate constraint %s;',
                                                       fk.conrelid::regclass::text,
                                                       fk.conname)),
                                      '{}') as validate_constraints,
-                            coalesce(array_agg(format('alter table %%s drop constraint %%s;',
+                            coalesce(array_agg(format('alter table %s drop constraint %s;',
                                                       fk.conrelid::regclass::text,
                                                       fk.conname))
                                               filter (where fk.conrelid <> t.oid),
@@ -115,7 +115,7 @@ select tn.table_name as name,
                              or
                              fk.confrelid = t.oid) and
                             fk.contype = 'f') fk
- cross join lateral (select coalesce(array_agg(format('grant %%s on table %%s__tat_new to "%%s";',
+ cross join lateral (select coalesce(array_agg(format('grant %s on table %s__tat_new to "%s";',
                                                       p.privileges,
                                                       tn.table_name,
                                                       p.grantee)),
@@ -132,7 +132,7 @@ select tn.table_name as name,
                             not tgisinternal) tg
  cross join lateral (select array_agg(a.attname) as all_columns,
                             json_object_agg(a.attname, a.atttypid::regtype) as column_types,
-                            coalesce(array_agg(format('alter sequence %%s owned by %%s__tat_new.%%s;',
+                            coalesce(array_agg(format('alter sequence %s owned by %s__tat_new.%s;',
                                                       s.serial_sequence,
                                                       tn.table_name,
                                                       a.attname))
@@ -143,16 +143,16 @@ select tn.table_name as name,
                       where a.attrelid = t.oid and
                             a.attnum > 0 and
                             not a.attisdropped) att
- cross join lateral (select coalesce(array_agg(format('create view %%s as %%s; %%s;',
+ cross join lateral (select coalesce(array_agg(format('create view %s as %s; %s;',
                                                       v.oid::regclass::text,
                                                       replace(replace(replace(pg_get_viewdef(v.oid),
-                                                                              format('timezone(''Europe/Moscow''::text, %%s.start_time) AS start_time', t.relname),
-                                                                              format('%%s.start_time', t.relname)),
-                                                                      format('timezone(''Europe/Moscow''::text, %%s.date_time) AS date_time', t.relname),
-                                                                      format('%%s.date_time', t.relname)),
-                                                              format('timezone(''Europe/Moscow''::text, %%s.hit_time) AS hit_time', t.relname),
-                                                              format('%%s.hit_time', t.relname)),
-                                                      (select string_agg(format('%%s; %%s;', pg_get_functiondef(pgt.tgfoid), pg_get_triggerdef(pgt.oid)), E';\n')
+                                                                              format('timezone(''Europe/Moscow''::text, %s.start_time) AS start_time', t.relname),
+                                                                              format('%s.start_time', t.relname)),
+                                                                      format('timezone(''Europe/Moscow''::text, %s.date_time) AS date_time', t.relname),
+                                                                      format('%s.date_time', t.relname)),
+                                                              format('timezone(''Europe/Moscow''::text, %s.hit_time) AS hit_time', t.relname),
+                                                              format('%s.hit_time', t.relname)),
+                                                      (select string_agg(format('%s; %s;', pg_get_functiondef(pgt.tgfoid), pg_get_triggerdef(pgt.oid)), E';\n')
                                                          from pg_trigger pgt
                                                         where pgt.tgrelid = v.oid::regclass))
                                                order by v.oid),
@@ -162,11 +162,11 @@ select tn.table_name as name,
                                                                 'acl', v.relacl))
                                              filter (where v.relacl is not null),
                                      '[]') as view_acl_to_grants_params,
-                            coalesce(array_agg(format('comment on view %%s is %%L;',
+                            coalesce(array_agg(format('comment on view %s is %L;',
                                                       v.oid::regclass, d.description))
                                               filter (where d.description is not null),
                                      '{}') as comment_views,
-                            coalesce(array_agg(format('drop view %%s;',
+                            coalesce(array_agg(format('drop view %s;',
                                                       v.oid::regclass)
                                                order by v.oid desc),
                                      '{}') as drop_views,
@@ -193,7 +193,7 @@ select tn.table_name as name,
                                         from w_depend d)) v
  cross join lateral (select coalesce(array_agg(pg_catalog.pg_get_functiondef(f.oid) || ';'), '{}') as create_functions,
                             coalesce(json_agg(json_build_object(
-                                                'obj_name', format('%%s(%%s)', f.oid::regproc, pg_get_function_identity_arguments(f.oid)),
+                                                'obj_name', format('%s(%s)', f.oid::regproc, pg_get_function_identity_arguments(f.oid)),
                                                 'obj_type', case
                                                               when f.prokind = 'p'
                                                                 then 'procedure'
@@ -202,7 +202,7 @@ select tn.table_name as name,
                                                 'acl', f.proacl))
                                              filter (where f.proacl is not null),
                                      '[]') as function_acl_to_grants_params,
-                            coalesce(array_agg(format('drop function %%s(%%s);',
+                            coalesce(array_agg(format('drop function %s(%s);',
                                                       f.oid::regproc::text,
                                                       pg_get_function_identity_arguments(f.oid))),
                                      '{}') as drop_functions
@@ -214,6 +214,6 @@ select tn.table_name as name,
                             t.reltype = any(f.proallargtypes)
                             or
                             f.prorettype = any(v.view_type_oids)) f
- cross join lateral (select coalesce(array_agg(format('alter table %%s set (%%s);', t.oid::regclass, ro.option)), '{}') as storage_parameters
+ cross join lateral (select coalesce(array_agg(format('alter table %s set (%s);', t.oid::regclass, ro.option)), '{}') as storage_parameters
                        from unnest(t.reloptions) as ro(option)) sp
- where t.oid = %s::regclass
+ where t.oid = $1::regclass
