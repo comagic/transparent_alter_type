@@ -1,0 +1,20 @@
+create or replace function "{name}__store_delta"() returns trigger as $$
+begin
+  if tg_op = 'INSERT' then
+    insert into {name}__tat_delta
+      values (new.*, default, 'i');
+
+  elsif tg_op = 'UPDATE' then
+    insert into {name}__tat_delta
+      values (new.*, default, 'u');
+
+  elsif tg_op = 'DELETE' then
+    insert into {name}__tat_delta
+      values (old.*, default, 'd');
+
+    return old;
+  end if;
+
+  return new;
+end;
+$$ language plpgsql security definer;

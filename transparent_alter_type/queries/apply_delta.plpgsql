@@ -1,0 +1,33 @@
+create or replace function "{name}__apply_delta"() returns integer as $$
+declare
+  r record;
+  rows integer := 0;
+begin
+  for r in with d as (
+             delete from {name}__tat_delta returning *
+           )
+           select *
+             from d
+            order by tat_delta_id
+  loop
+    if r.tat_delta_op = 'i' then
+      insert into {name}__tat_new({columns})
+        values ({val_columns})
+        on conflict do nothing;
+
+    elsif r.tat_delta_op = 'u' then
+      update {name}__tat_new t
+         set {set_columns}
+       where {where};
+
+    elsif r.tat_delta_op = 'd' then
+      delete from {name}__tat_new t
+       where {where};
+    end if;
+
+    rows := rows + 1;
+  end loop;
+
+  return rows;
+end;
+$$ language plpgsql security definer;

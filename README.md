@@ -5,28 +5,21 @@ transparent_alter_type - tools for alter type of columns without locks.
 
 # Installation
 
-git clone git@github.com:comagic/transparent_alter_type.git
+$ pip install transparent-alter-type 
 
 # Dependency
 
-* python3
-* psycopg2
-* pg_export
+* python3.8+
 
 # Usage
 
-    transparent_alter_type.py [--help] -h HOST -p PORT -d DBNAME -t TABLE_NAME
-                              [-c COLUMN] -j JOBS [--force] [--cleanup]
-                              [--lock-timeout LOCK_TIMEOUT]
+    usage: transparent_alter_type [--help] -t TABLE_NAME [-c COLUMN] [-h HOST] [-d DBNAME]
+                              [-U USER] [-W PASSWORD] [-p PORT] [-j JOBS] [--force]
+                              [--cleanup] [--lock-timeout LOCK_TIMEOUT]
                               [--time-between-locks TIME_BETWEEN_LOCKS]
-                              [--work-mem WORK_MEM]
-                              [--min-delta-rows MIN_DELTA_ROWS]
-                              [--show-queries]
-                              [--skip-fk-validation]
-                              [--pgbouncer-host PGBOUNCER_HOST]
-                              [--pgbouncer-port PGBOUNCER_PORT]
-                              [--pgbouncer-pause-timeout PGBOUNCER_PAUSE_TIMEOUT]
-                              [--pgbouncer-time-between-pause PGBOUNCER_TIME_BETWEEN_PAUSE]
+                              [--work-mem WORK_MEM] [--min-delta-rows MIN_DELTA_ROWS]
+                              [--skip-fk-validation] [--show-queries]
+                              
 
 # How it works
 
@@ -48,5 +41,4 @@ git clone git@github.com:comagic/transparent_alter_type.git
 
 # Quick examples
 
-    ./transparent_alter_type.py -h 192.168.20.51 -p 5110 -d billing -j 8 -t account -c "balance:numeric(14,4)" -c "dept_limit:numeric(14,4)"  --pgbouncer-host 192.168.1.1 --pgbouncer-port 6110
-
+    ./transparent_alter_type.py -h 127.0.0.1 -p 5432 -d billing -j 8 -t account -c "balance:numeric(14,4)" -c "dept_limit:numeric(14,4)"
