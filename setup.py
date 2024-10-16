@@ -35,7 +35,7 @@ class PyTest(TestCommand):
 setup_requires = []
 
 install_requires = [
-    'psycopg2>=2.8.6',
+    'asyncpg>=0.27.0',
     'pg-export>=3.7.0',
 ]
 
