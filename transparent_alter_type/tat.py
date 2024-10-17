@@ -15,17 +15,8 @@ from .pg_pool import PgPool
 class TAT:
     def __init__(self, args):
         self.args = args
-        self.args_table_name = args.table_name
         self.table_name = None
         self.table = None
-        self.jobs = args.jobs
-        self.time_between_locks = args.time_between_locks
-        self.work_mem = args.work_mem
-        self.is_force = args.force
-        self.is_cleanup = args.cleanup
-        self.show_queries = args.show_queries
-        self.min_delta_rows = args.min_delta_rows
-        self.is_skip_fk_validation = args.skip_fk_validation
         self.columns = [{'column': c.split(':')[0],
                          'type': c.split(':')[1]}
                         for c in args.column]
@@ -64,21 +55,21 @@ class TAT:
 
     async def get_table_info(self):
         query = self.get_query('get_table_info.sql')
-        self.table = await self.db.fetchrow(query, self.args_table_name)
+        self.table = await self.db.fetchrow(query, self.args.table_name)
 
         if not self.table:
             raise Exception('table not found')
         elif not self.table['pk_columns']:
-            raise Exception(f'table {self.args_table_name} does not have primary key or not null unique constraint')
+            raise Exception(f'table {self.args.table_name} does not have primary key or not null unique constraint')
 
         self.table_name = self.table['name']
 
-        if not self.is_force:
+        if not self.args.force:
             columns_to_alter = []
             for column in self.columns:
                 pg_type = await self.db.fetchval('select $1::regtype', column['type'])
                 if self.table['column_types'][column['column']] == pg_type:
-                    print(f'NOTICE: column {self.args_table_name}.{column["column"]} already has {pg_type} type')
+                    print(f'NOTICE: column {self.table_name}.{column["column"]} already has {pg_type} type')
                 else:
                     columns_to_alter.append(column)
             if len(columns_to_alter) == 0:
@@ -245,7 +236,7 @@ class TAT:
 
         while True:
             rows = await self.apply_delta()
-            if rows <= self.min_delta_rows:
+            if rows <= self.args.min_delta_rows:
                 break
 
         async with self.exclusive_lock_table() as con:
@@ -287,7 +278,7 @@ class TAT:
     async def validate_constraints(self):
         if not self.table['validate_constraints']:
             return
-        if self.is_skip_fk_validation:
+        if self.args.skip_fk_validation:
             for constraint in self.table['validate_constraints']:
                 print(f'skip constraint validation: {constraint}')
             return
@@ -315,7 +306,7 @@ class TAT:
         await self.db.init_pool()
         await self.get_table_info()
 
-        if self.is_cleanup:
+        if self.args.cleanup:
             await self.cancel_autovacuum()
             await self.cleanup()
             return
