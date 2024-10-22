@@ -22,7 +22,11 @@ select tn.table_name as name,
        f.create_functions,
        f.function_acl_to_grants_params,
        att.alter_sequences,
-       sp.storage_parameters
+       sp.storage_parameters,
+       inh.inherits,
+       attach.attach_expr,
+       part.partition_expr,
+       chl.children
   from pg_class t
  cross join lateral (select t.oid::regclass::text as table_name) tn
   left join lateral (select format('comment on table %s__tat_new is %L;',
@@ -41,15 +45,13 @@ select tn.table_name as name,
                                                order by cardinality(i.indkey) desc),
                                      '{}') as create_indexes,
                             coalesce(array_agg(format('alter index %s.%s rename to %s;',
-                                                      icn.nspname,
+                                                      ic.relnamespace::regnamespace,
                                                       (ic.relname || '__tat_new')::name,
                                                       ic.relname)),
                                      '{}') as rename_indexes
                        from pg_index i
                       inner join pg_class ic
                               on ic.oid = i.indexrelid
-                      inner join pg_namespace icn
-                              on icn.oid = ic.relnamespace
                       where i.indrelid = t.oid and
                             ic.relname not like '%\_tat') i
   left join lateral (select uni.contype,
@@ -216,4 +218,45 @@ select tn.table_name as name,
                             f.prorettype = any(v.view_type_oids)) f
  cross join lateral (select coalesce(array_agg(format('alter table %s set (%s);', t.oid::regclass, ro.option)), '{}') as storage_parameters
                        from unnest(t.reloptions) as ro(option)) sp
+ cross join lateral (select array_agg(i.inhparent::regclass::text) as inherits
+                       from pg_inherits i
+                      where i.inhrelid = t.oid) as inh
+ cross join lateral (select case
+                              when t.relpartbound is not null
+                                then format(
+                                       'alter table only %s__tat_new attach partition %s__tat_new %s;',
+                                       inh.inherits[1],
+                                       t.oid::regclass,
+                                       pg_get_expr(t.relpartbound, t.oid))
+                            end as attach_expr) as attach
+  left join lateral (select format(
+                              ' partition by %s (%s)',
+                              case p.partstrat
+                                when 'r' then 'range'
+                                when 'l' then 'list'
+                                when 'h' then 'hash'
+                              end,
+                              (select string_agg(a.attname, ', ') --FIXME: need add expration
+                                 from unnest(p.partattrs::int[]) i
+                                 left join pg_attribute a
+                                        on a.attrelid = t.oid and
+                                           a.attnum = i)) as partition_expr
+                       from pg_partitioned_table p
+                      where p.partrelid = t.oid) part
+         on true
+ cross join lateral (with recursive wchld as (
+                       select i.inhrelid, 0 as level
+                         from pg_inherits i
+                        where i.inhparent = t.oid
+                       union all
+                       select i.inhrelid, wchld.level + 1 as level
+                         from wchld
+                        inner join pg_inherits i
+                                on i.inhparent = wchld.inhrelid
+                     )
+                     select coalesce(
+                              array_agg(wchld.inhrelid::regclass::text
+                                        order by wchld.level, wchld.inhrelid::regclass::text),
+                              '{}') as children
+                       from wchld) as chl(children)
  where t.oid = $1::regclass
