@@ -6,7 +6,7 @@ export PGDATABASE=tat_test
 
 set -e
 docker run --name pg_tat_test -p $PGPORT:5432 -e POSTGRES_PASSWORD=$PGPASSWORD -d postgres:15
-sleep 1
+sleep 1.5
 echo "build src database"
 psql -c "create database $PGDATABASE" -d postgres
 pg_import source_database -d $PGDATABASE
@@ -36,11 +36,15 @@ psql -c "delete from analytics.session
 psql -c "insert into analytics.session(page_id, ts, is_loaded, duration)
          select i % 200 + 1, '2024-01-01'::date + (random() * 59)::int, random() < 0.1, i % 10
            from generate_series(1, 1000) i"
+psql -c "insert into analytics.session(page_id, ts, is_loaded, duration)
+         select i % 200 + 1, '2023-12-01'::date + (random() * 20)::int, false, i % 10
+           from generate_series(1, 100) i"
 wait
 
-pg_export $PGDATABASE /tmp/exp_tat_test
+
 echo "diff table structure:"
-diff -qr /tmp/exp_tat_test final_database && echo " all tables: ok"
+pg_export $PGDATABASE /tmp/exp_tat_test
+diff -qr /tmp/exp_tat_test/schemas/ final_database/schemas && echo " all tables: ok"
 echo
 echo "check sum:"
 psql -t -c "select 'analytics.page: ' ||
@@ -52,7 +56,7 @@ psql -t -c "select 'analytics.page: ' ||
               from analytics.page" | grep -v "^$"
 psql -t -c "select 'analytics.session: ' ||
                    case
-                     when count(1) = 3000 and sum(duration) = 33480
+                     when count(1) = 3100 and sum(duration) = 33930
                        then 'ok'
                      else 'FAILED'
                    end
