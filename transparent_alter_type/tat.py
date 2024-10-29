@@ -6,6 +6,7 @@ from argparse import Namespace
 from contextlib import asynccontextmanager
 import time
 import datetime
+from enum import Enum
 from typing import List
 
 import asyncpg
@@ -14,8 +15,15 @@ from pg_export.acl import acl_to_grants
 from .pg_pool import PgPool
 
 
+class TableKind(Enum):
+    regular = 'r'
+    foreign = 'f'
+    partitioned = 'p'
+
+
 class TAT:
     children: List["TAT"]
+    table_kind: TableKind
 
     def __init__(self, args, is_sub_table=False, pool=None):
         self.args = args
@@ -27,6 +35,7 @@ class TAT:
                          'type': c.split(':')[1]}
                         for c in args.column]
         self.db = pool or PgPool(args)
+        self.table_locked = False
 
     @staticmethod
     def duration(start_time):
@@ -70,10 +79,12 @@ class TAT:
 
         if not self.table:
             raise Exception('table not found')
-        elif not self.table['pk_columns'] and self.table['partition_expr'] is None:
-            raise Exception(f'table {self.args.table_name} does not have primary key or not null unique constraint')
 
+        self.table_kind = TableKind(self.table['kind'])
         self.table_name = self.table['name']
+
+        if not self.table['pk_columns'] and self.table_kind == TableKind.regular:
+            raise Exception(f'table {self.table_name} does not have primary key or not null unique constraint')
 
         if not self.args.force:
             columns_to_alter = []
@@ -97,6 +108,8 @@ class TAT:
                 await child.get_table_info()
 
     async def create_table_new(self):
+        if self.table_kind == TableKind.foreign:
+            return
         self.log(f'create {self.table_name}__tat_new')
 
         await self.db.execute(f'''
@@ -135,7 +148,7 @@ class TAT:
             await child.create_table_new()
 
     async def create_table_delta(self):
-        if self.table['partition_expr'] is None:
+        if self.table_kind == TableKind.regular:
             self.log(f'create {self.table_name}__tat_delta')
 
             await self.db.execute(f'''
@@ -195,10 +208,10 @@ class TAT:
     async def copy_data(self):
         self.log_border()
         tasks = []
-        if self.table['partition_expr'] is None:
+        if self.table_kind == TableKind.regular:
             tasks.append(self.copy_table())
         for child in self.children:
-            if child.table['partition_expr'] is None:
+            if child.table_kind == TableKind.regular:
                 tasks.append(child.copy_table())
         await self.run_parallel(tasks, self.args.jobs)
 
@@ -236,7 +249,7 @@ class TAT:
 
     async def apply_delta(self, con=None):
         rows = 0
-        if self.table['partition_expr'] is None:
+        if self.table_kind == TableKind.regular:
             ts = time.time()
             self.log('apply_delta: start')
             if con is None:
@@ -260,16 +273,19 @@ class TAT:
             async with self.db.transaction() as con:
                 await self.cancel_autovacuum(con)
                 self.log(f'lock table: start')
-                sys.stdout.flush()
                 try:
                     await con.execute(f'lock table {self.table_name} in access exclusive mode;')
                     self.log('lock table: done')
+                    self.table_locked = True
                     yield con
                     break
                 except (
                     asyncpg.exceptions.LockNotAvailableError,
                     asyncpg.exceptions.DeadlockDetectedError
                 ) as e:
+                    if self.table_locked:
+                        await con.execute('rollback;')
+                        raise e
                     self.log(f'lock table: failed: {e}')
                     await con.execute('rollback;')
             await asyncio.sleep(self.args.time_between_locks)
@@ -283,17 +299,43 @@ class TAT:
         for child in self.children:
             await child.drop_depend_objects(con)
 
+    async def detach_foreign_tables(self, con):
+        if self.table_kind == TableKind.foreign:
+            self.log('detach foreign table')
+            await con.execute(self.table['detach_foreign_expr'])
+        for child in self.children:
+            await child.detach_foreign_tables(con)
+
+    async def attach_foreign_tables(self, con):
+        if self.table_kind == TableKind.foreign:
+            self.log('attach foreign table')
+            if self.columns:
+                await con.execute(
+                    ''.join(
+                        '''
+                        alter table {name}
+                          alter column {column}
+                            type {type};
+                        '''.format(**self.table, **column)
+                        for column in self.columns
+                    )
+                )
+            await con.execute(self.table['attach_foreign_expr'])
+        for child in self.children:
+            await child.attach_foreign_tables(con)
+
     async def drop_original_table(self, con):
         self.log(f'drop original table')
         await con.execute(f'drop table {self.table_name};')
 
     async def rename_table(self, con):
+        if self.table_kind == TableKind.foreign:
+            return
         self.log(f'rename table {self.table_name}__tat_new -> {self.table_name}')
         await con.execute(f'alter table {self.table_name}__tat_new rename to {self.table["name_without_schema"]};')
         await con.execute('\n'.join(self.table['rename_indexes']))
         await con.execute('\n'.join(self.table['create_constraints']))
         await con.execute('\n'.join(self.table['create_triggers']))
-        self.log(f'+++++alter table {self.table_name} reset (autovacuum_enabled);')
         await con.execute(f'alter table {self.table_name} reset (autovacuum_enabled);')
         await con.execute('\n'.join(self.table['storage_parameters']))
         for child in self.children:
@@ -331,8 +373,10 @@ class TAT:
             await self.apply_delta(con)
             await self.drop_depend_objects(con)
             await self.cleanup(con, with_tat_new=False)
+            await self.detach_foreign_tables(con)
             await self.drop_original_table(con)
             await self.rename_table(con)
+            await self.attach_foreign_tables(con)
             await self.recreate_depend_objects(con)
         self.log('switch table: done')
 

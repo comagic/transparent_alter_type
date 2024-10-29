@@ -1,5 +1,6 @@
 select tn.table_name as name,
        t.relname as name_without_schema,
+       t.relkind::text as kind,
        pg_size_pretty(pg_total_relation_size(t.oid)) as pretty_size,
        pg_size_pretty(pg_relation_size(t.oid)) as pretty_data_size,
        att.all_columns,
@@ -25,6 +26,8 @@ select tn.table_name as name,
        sp.storage_parameters,
        inh.inherits,
        attach.attach_expr,
+       fattach.attach_foreign_expr,
+       fdetach.detach_foreign_expr,
        part.partition_expr,
        chl.children
   from pg_class t
@@ -222,13 +225,28 @@ select tn.table_name as name,
                        from pg_inherits i
                       where i.inhrelid = t.oid) as inh
  cross join lateral (select case
-                              when t.relpartbound is not null
+                              when t.relkind != 'f' and t.relpartbound is not null
                                 then format(
                                        'alter table only %s__tat_new attach partition %s__tat_new %s;',
                                        inh.inherits[1],
                                        t.oid::regclass,
                                        pg_get_expr(t.relpartbound, t.oid))
                             end as attach_expr) as attach
+ cross join lateral (select case
+                              when t.relkind = 'f' and t.relpartbound is not null
+                                then format(
+                                       'alter table only %s attach partition %s %s;',
+                                       inh.inherits[1],
+                                       t.oid::regclass,
+                                       pg_get_expr(t.relpartbound, t.oid))
+                            end as attach_foreign_expr) as fattach
+ cross join lateral (select case
+                              when t.relkind = 'f' and t.relpartbound is not null
+                                then format(
+                                       'alter table only %s detach partition %s;',
+                                       inh.inherits[1],
+                                       t.oid::regclass)
+                            end as detach_foreign_expr) as fdetach
   left join lateral (select format(
                               ' partition by %s (%s)',
                               case p.partstrat

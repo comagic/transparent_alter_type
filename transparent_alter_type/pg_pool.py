@@ -9,7 +9,7 @@ def print_query(query, args):
         args = f', {args=}'
     else:
         args = ''
-    print(f'QUERY: {query}{args}\n')
+    print(f'\033[33mQUERY: {query}{args}\033[0m\n')
 
 
 class ConnectWrapper:
