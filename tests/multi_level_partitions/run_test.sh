@@ -17,7 +17,7 @@ psql -c "insert into analytics.page(url)
 
 transparent_alter_type -t analytics.page -c "id:bigint" -j 4 &
 
-sleep 0.4  # the following 3 commands will be executed in parallel with transparent_alter_type
+sleep 1  # the following 3 commands will be executed in parallel with transparent_alter_type
 psql -c "update analytics.page
             set url = url + 20
           where id between 20 and 30"
@@ -34,7 +34,7 @@ psql -c "insert into analytics.session(page_id, ts, is_loaded, duration)
 
 transparent_alter_type -t analytics.session -c "id:bigint" -c "page_id:bigint" -j 4 &
 
-sleep 0.4  # the following 3 commands will be executed in parallel with transparent_alter_type
+sleep 1  # the following 3 commands will be executed in parallel with transparent_alter_type
 psql -c "update analytics.session
             set duration = duration + 20
           where id < 1000"
@@ -55,7 +55,7 @@ psql -c "insert into analytics.hit_2024_01(session_id, ts, duration)
 
 transparent_alter_type -t analytics.hit -c "id:bigint" -c "session_id:bigint" -j 4 &
 
-sleep 0.4  # the following 3 commands will be executed in parallel with transparent_alter_type
+sleep 1  # the following 3 commands will be executed in parallel with transparent_alter_type
 psql -c "update analytics.hit
             set duration = duration + 20
           where id < 1000"

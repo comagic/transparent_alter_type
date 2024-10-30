@@ -28,8 +28,7 @@ select tn.table_name as name,
        attach.attach_expr,
        fattach.attach_foreign_expr,
        fdetach.detach_foreign_expr,
-       part.partition_expr,
-       chl.children
+       part.partition_expr
   from pg_class t
  cross join lateral (select t.oid::regclass::text as table_name) tn
   left join lateral (select format('comment on table %s__tat_new is %L;',
@@ -262,19 +261,4 @@ select tn.table_name as name,
                        from pg_partitioned_table p
                       where p.partrelid = t.oid) part
          on true
- cross join lateral (with recursive wchld as (
-                       select i.inhrelid, 0 as level
-                         from pg_inherits i
-                        where i.inhparent = t.oid
-                       union all
-                       select i.inhrelid, wchld.level + 1 as level
-                         from wchld
-                        inner join pg_inherits i
-                                on i.inhparent = wchld.inhrelid
-                     )
-                     select coalesce(
-                              array_agg(wchld.inhrelid::regclass::text
-                                        order by wchld.level, wchld.inhrelid::regclass::text),
-                              '{}') as children
-                       from wchld) as chl(children)
- where t.oid = $1::regclass
+ where t.oid = any($1::regclass[])

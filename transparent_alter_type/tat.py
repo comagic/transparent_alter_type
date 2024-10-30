@@ -73,12 +73,26 @@ class TAT:
         full_file_name = os.path.join(os.path.dirname(__file__), 'queries', query_file_name)
         return open(full_file_name).read()
 
-    async def get_table_info(self):
-        query = self.get_query('get_table_info.sql')
-        self.table = await self.db.fetchrow(query, self.args.table_name)
-
-        if not self.table:
-            raise Exception('table not found')
+    async def get_table_info(self, table=None):
+        children = []
+        tables_data = {}
+        if table:
+            self.table = table
+        else:
+            db_table_name = await self.db.fetchval('select $1::regclass::text', self.args.table_name)
+            children = await self.db.fetchval(
+                self.get_query('get_child_tables.sql'),
+                db_table_name
+            )
+            table_names = [db_table_name] + children
+            tables_data = {
+                table['name']: table
+                for table in await self.db.fetch(
+                    self.get_query('get_table_info.sql'),
+                    table_names
+                )
+            }
+            self.table = tables_data[db_table_name]
 
         self.table_kind = TableKind(self.table['kind'])
         self.table_name = self.table['name']
@@ -102,10 +116,10 @@ class TAT:
         if not self.is_sub_table:  # all children are processing on root level
             self.children = [
                 TAT(Namespace(**dict(vars(self.args), table_name=child)), True, self.db)
-                for child in self.table['children']
+                for child in children
             ]
             for child in self.children:
-                await child.get_table_info()
+                await child.get_table_info(tables_data[child.args.table_name])
 
     async def create_table_new(self):
         if self.table_kind == TableKind.foreign:
