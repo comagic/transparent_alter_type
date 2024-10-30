@@ -296,8 +296,8 @@ class TAT:
             await asyncio.sleep(self.args.time_between_locks)
 
     async def drop_depend_objects(self, con):
-        await con.execute('\n'.join(self.table['drop_functions']))
         await con.execute('\n'.join(self.table['drop_views']))
+        await con.execute('\n'.join(self.table['drop_functions']))
         await self.cancel_all_autovacuum(con)
         await con.execute('\n'.join(self.table['drop_constraints']))
         await con.execute('\n'.join(self.table['alter_sequences']))
@@ -363,6 +363,13 @@ class TAT:
             await child.rename_table(con)
 
     async def recreate_depend_objects(self, con):
+        await con.execute('\n'.join(self.table['create_functions']))
+        await con.execute('\n'.join(
+            acl_to_grants(params['acl'],
+                          params['obj_type'],
+                          params['obj_name'])
+            for params in self.table['function_acl_to_grants_params']
+        ))
         await con.execute('\n'.join(self.table['create_views']))
         await con.execute('\n'.join(
             acl_to_grants(params['acl'],
@@ -371,13 +378,6 @@ class TAT:
             for params in self.table['view_acl_to_grants_params']
         ))
         await con.execute('\n'.join(self.table['comment_views']))
-        await con.execute('\n'.join(self.table['create_functions']))
-        await con.execute('\n'.join(
-            acl_to_grants(params['acl'],
-                          params['obj_type'],
-                          params['obj_name'])
-            for params in self.table['function_acl_to_grants_params']
-        ))
         for child in self.children:
             await child.recreate_depend_objects(con)
 
