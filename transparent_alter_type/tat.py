@@ -176,7 +176,7 @@ class TAT:
             ''')
 
             await self.db.execute(f'''
-                alter table {self.table_name}__tat_delta 
+                alter table {self.table_name}__tat_delta
                   add column tat_delta_id serial,
                   add column tat_delta_op "char";
             ''')
@@ -291,7 +291,7 @@ class TAT:
         while True:
             async with self.db.transaction() as con:
                 await self.cancel_autovacuum(con)
-                self.log(f'lock table: start')
+                self.log('lock table: start')
                 try:
                     await con.execute(f'lock table {self.table_name} in access exclusive mode;')
                     self.log('lock table: done')
@@ -357,7 +357,7 @@ class TAT:
             await child.attach_foreign_tables(con)
 
     async def drop_original_table(self, con):
-        self.log(f'drop original table')
+        self.log('drop original table')
         if self.table_kind == TableKind.regular and self.children:  # old style inherits partitioning
             for child in reversed(self.children):
                 if child.table_kind == TableKind.regular:
