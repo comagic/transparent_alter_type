@@ -137,13 +137,18 @@ class TAT:
         await self.db.execute('\n'.join(self.table['create_check_constraints']))
         await self.db.execute('\n'.join(self.table['grant_privileges']))
         await self.db.execute(self.table['comment'])
-        if self.table['partition_expr'] is None:
+        if self.table_kind == TableKind.regular:
             await self.cancel_autovacuum()
             await self.db.execute(f'''
                 alter table {self.table_name}          set (autovacuum_enabled = false);
                 alter table {self.table_name}__tat_new set (autovacuum_enabled = false);
             ''')
-        await self.db.execute(self.table['attach_expr'])
+        if self.table['attach_expr']:
+            await self.db.execute(self.table['attach_expr'])
+        elif self.table['inherits']:
+            await self.db.execute(
+                f'alter table {self.table_name}__tat_new inherit {self.table["inherits"][0]}__tat_new'
+            )
         for child in self.children:
             await child.create_table_new()
 
@@ -220,7 +225,7 @@ class TAT:
         self.log(f'copy data: start ({self.table["pretty_data_size"]})')
         await self.db.execute(f'''
             insert into {self.table_name}__tat_new
-              select * from {self.table_name}
+              select * from only {self.table_name}
         ''')
         self.log(f'copy data: done ({self.table["pretty_data_size"]}) in {self.duration(ts)}')
 
@@ -301,14 +306,19 @@ class TAT:
 
     async def detach_foreign_tables(self, con):
         if self.table_kind == TableKind.foreign:
-            self.log('detach foreign table')
-            await con.execute(self.table['detach_foreign_expr'])
+            if self.table['detach_foreign_expr']:  # declarative partitioning
+                self.log('detach foreign table')
+                await con.execute(self.table['detach_foreign_expr'])
+            else:   # old style inherits partitioning
+                self.log('no inherit foreign table')
+                await con.execute(
+                    f'alter table {self.table_name} no inherit {self.table["inherits"][0]}'
+                )
         for child in self.children:
             await child.detach_foreign_tables(con)
 
     async def attach_foreign_tables(self, con):
         if self.table_kind == TableKind.foreign:
-            self.log('attach foreign table')
             if self.columns:
                 await con.execute(
                     ''.join(
@@ -320,12 +330,23 @@ class TAT:
                         for column in self.columns
                     )
                 )
-            await con.execute(self.table['attach_foreign_expr'])
+            if self.table['attach_foreign_expr']:  # declarative partitioning
+                self.log('attach foreign table')
+                await con.execute(self.table['attach_foreign_expr'])
+            else:  # old style inherits partitioning
+                self.log('inherit foreign table')
+                await con.execute(
+                    f'alter table {self.table_name} inherit {self.table["inherits"][0]}'
+                )
         for child in self.children:
             await child.attach_foreign_tables(con)
 
     async def drop_original_table(self, con):
         self.log(f'drop original table')
+        if self.table_kind == TableKind.regular and self.children:  # old style inherits partitioning
+            for child in reversed(self.children):
+                if child.table_kind == TableKind.regular:
+                    await con.execute(f'drop table {child.table_name};')
         await con.execute(f'drop table {self.table_name};')
 
     async def rename_table(self, con):
@@ -404,20 +425,22 @@ class TAT:
     async def cleanup(self, db=None, with_tat_new=True):
         if not db:
             db = self.db
+        for child in reversed(self.children):
+            await child.cleanup(db, with_tat_new)
         await db.execute(f'drop trigger if exists store__tat_delta on {self.table_name};')
         await db.execute(f'drop function if exists "{self.table_name}__store_delta"();')
         await db.execute(f'drop function if exists "{self.table_name}__apply_delta"();')
         await db.execute(f'drop table if exists {self.table_name}__tat_delta;')
         if with_tat_new:
             await db.execute(f'drop table if exists {self.table_name}__tat_new;')
-        for child in self.children:
-            await child.cleanup(db, with_tat_new)
 
     def check_sub_table(self):
         if self.table['inherits'] and not self.is_sub_table:
             parent = self.table['inherits'][0]
             raise Exception(f'table {self.table_name} is partition of table {parent}, '
                             f'you need alter {parent} instead')
+        if self.table['inherits'] and len(self.table['inherits']) > 1:
+            raise Exception('Multi inherits not supported')
 
     async def run(self):
         ts = time.time()
