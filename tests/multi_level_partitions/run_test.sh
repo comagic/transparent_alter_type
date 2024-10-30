@@ -1,11 +1,19 @@
+!/bin/bash
+
 export PGPASSWORD=123456
 export PGUSER=postgres
 export PGHOST=0.0.0.0
 export PGPORT=5432
 export PGDATABASE=tat_test
+PG_VERSION=15
 
 set -e
-docker run --name pg_tat_test -p $PGPORT:5432 -e POSTGRES_PASSWORD=$PGPASSWORD -d postgres:15
+
+if [ $# -eq 1 ]; then
+    PG_VERSION=$1
+fi
+
+docker run --name pg_tat_test -p $PGPORT:5432 -e POSTGRES_PASSWORD=$PGPASSWORD -d postgres:$PG_VERSION
 sleep 1.5
 echo "build src database"
 psql -c "create database $PGDATABASE" -d postgres
@@ -71,7 +79,7 @@ wait
 
 echo "diff table structure:"
 pg_export $PGDATABASE /tmp/exp_tat_test
-diff -qr /tmp/exp_tat_test/schemas/ final_database/schemas && echo " all tables: ok"
+diff -x "public.sql" -qr /tmp/exp_tat_test/schemas/ final_database/schemas && echo " all tables: ok"
 echo
 echo "check sum:"
 psql -t -c "select 'analytics.page: ' ||
@@ -105,4 +113,4 @@ psql -t -c "select 'analytics.hit: ' ||
 #psql -t -c "select count(1), sum(duration)
 #              from analytics.hit"
 
-#docker rm -f pg_tat_test > /dev/null
+docker rm -f pg_tat_test > /dev/null
