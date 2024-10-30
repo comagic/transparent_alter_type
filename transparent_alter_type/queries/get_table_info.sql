@@ -1,5 +1,6 @@
 select tn.table_name as name,
        t.relname as name_without_schema,
+       t.relkind::text as kind,
        pg_size_pretty(pg_total_relation_size(t.oid)) as pretty_size,
        pg_size_pretty(pg_relation_size(t.oid)) as pretty_data_size,
        att.all_columns,
@@ -22,7 +23,12 @@ select tn.table_name as name,
        f.create_functions,
        f.function_acl_to_grants_params,
        att.alter_sequences,
-       sp.storage_parameters
+       sp.storage_parameters,
+       inh.inherits,
+       attach.attach_expr,
+       fattach.attach_foreign_expr,
+       fdetach.detach_foreign_expr,
+       part.partition_expr
   from pg_class t
  cross join lateral (select t.oid::regclass::text as table_name) tn
   left join lateral (select format('comment on table %s__tat_new is %L;',
@@ -41,15 +47,13 @@ select tn.table_name as name,
                                                order by cardinality(i.indkey) desc),
                                      '{}') as create_indexes,
                             coalesce(array_agg(format('alter index %s.%s rename to %s;',
-                                                      icn.nspname,
+                                                      ic.relnamespace::regnamespace,
                                                       (ic.relname || '__tat_new')::name,
                                                       ic.relname)),
                                      '{}') as rename_indexes
                        from pg_index i
                       inner join pg_class ic
                               on ic.oid = i.indexrelid
-                      inner join pg_namespace icn
-                              on icn.oid = ic.relnamespace
                       where i.indrelid = t.oid and
                             ic.relname not like '%\_tat') i
   left join lateral (select uni.contype,
@@ -216,4 +220,45 @@ select tn.table_name as name,
                             f.prorettype = any(v.view_type_oids)) f
  cross join lateral (select coalesce(array_agg(format('alter table %s set (%s);', t.oid::regclass, ro.option)), '{}') as storage_parameters
                        from unnest(t.reloptions) as ro(option)) sp
- where t.oid = $1::regclass
+ cross join lateral (select array_agg(i.inhparent::regclass::text) as inherits
+                       from pg_inherits i
+                      where i.inhrelid = t.oid) as inh
+ cross join lateral (select case
+                              when t.relkind != 'f' and t.relpartbound is not null
+                                then format(
+                                       'alter table only %s__tat_new attach partition %s__tat_new %s;',
+                                       inh.inherits[1],
+                                       t.oid::regclass,
+                                       pg_get_expr(t.relpartbound, t.oid))
+                            end as attach_expr) as attach
+ cross join lateral (select case
+                              when t.relkind = 'f' and t.relpartbound is not null
+                                then format(
+                                       'alter table only %s attach partition %s %s;',
+                                       inh.inherits[1],
+                                       t.oid::regclass,
+                                       pg_get_expr(t.relpartbound, t.oid))
+                            end as attach_foreign_expr) as fattach
+ cross join lateral (select case
+                              when t.relkind = 'f' and t.relpartbound is not null
+                                then format(
+                                       'alter table only %s detach partition %s;',
+                                       inh.inherits[1],
+                                       t.oid::regclass)
+                            end as detach_foreign_expr) as fdetach
+  left join lateral (select format(
+                              ' partition by %s (%s)',
+                              case p.partstrat
+                                when 'r' then 'range'
+                                when 'l' then 'list'
+                                when 'h' then 'hash'
+                              end,
+                              (select string_agg(a.attname, ', ') --FIXME: need add expration
+                                 from unnest(p.partattrs::int[]) i
+                                 left join pg_attribute a
+                                        on a.attrelid = t.oid and
+                                           a.attnum = i)) as partition_expr
+                       from pg_partitioned_table p
+                      where p.partrelid = t.oid) part
+         on true
+ where t.oid = any($1::regclass[])
