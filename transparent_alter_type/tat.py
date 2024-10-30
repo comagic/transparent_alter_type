@@ -312,7 +312,8 @@ class TAT:
     async def drop_depend_objects(self, con):
         await con.execute('\n'.join(self.table['drop_views']))
         await con.execute('\n'.join(self.table['drop_functions']))
-        await self.cancel_all_autovacuum(con)
+        if self.table['drop_constraints']:
+            await self.cancel_all_autovacuum(con)
         await con.execute('\n'.join(self.table['drop_constraints']))
         await con.execute('\n'.join(self.table['alter_sequences']))
         for child in self.children:
