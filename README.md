@@ -18,7 +18,7 @@ $ pip install transparent-alter-type
                               [--cleanup] [--lock-timeout LOCK_TIMEOUT]
                               [--time-between-locks TIME_BETWEEN_LOCKS]
                               [--work-mem WORK_MEM] [--min-delta-rows MIN_DELTA_ROWS]
-                              [--skip-fk-validation] [--show-queries]
+                              [--skip-fk-validation] [--show-queries] [--batch-size BATCH_SIZE]
                               
 
 # How it works
