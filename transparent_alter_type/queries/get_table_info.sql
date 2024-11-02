@@ -29,7 +29,8 @@ select tn.table_name as name,
        fattach.attach_foreign_expr,
        fdetach.detach_foreign_expr,
        part.partition_expr,
-       ri.replica_identity
+       ri.replica_identity,
+       pb.publications
   from pg_class t
  cross join lateral (select t.oid::regclass::text as table_name) tn
   left join lateral (select format('comment on table %s__tat_new is %L;',
@@ -279,4 +280,14 @@ select tn.table_name as name,
                                             ir.indisreplident))
                     end) as ri(replica_identity)
          on t.relreplident in ('f', 'n', 'i')
+ cross join lateral (select coalesce(
+                              array_agg(
+                                format('alter publication %I add table %s;',
+                                       p.pubname,
+                                       t.oid::regclass)),
+                              '{}') as publications
+                       from pg_publication_rel pr
+                      inner join pg_publication p
+                              on p.oid = pr.prpubid
+                      where pr.prrelid = t.oid) pb
  where t.oid = any($1::regclass[])

@@ -373,6 +373,7 @@ class TAT:
         await con.execute('\n'.join(self.table['create_constraints']))
         await con.execute('\n'.join(self.table['create_triggers']))
         await con.execute(self.table['replica_identity'])
+        await con.execute('\n'.join(self.table['publications']))
         await con.execute(f'alter table {self.table_name} reset (autovacuum_enabled);')
         await con.execute('\n'.join(self.table['storage_parameters']))
         for child in self.children:

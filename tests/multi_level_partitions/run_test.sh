@@ -20,6 +20,7 @@ sleep 1.5
 echo "build src database"
 psql -c "create database $PGDATABASE" -d postgres
 pg_import source_database -d $PGDATABASE
+psql -f source_database/publications/logical_replica.sql
 
 #--------------------------------------------
 psql -c "insert into analytics.page(url)
@@ -82,6 +83,7 @@ wait
 echo "diff table structure:"
 pg_export $PGDATABASE /tmp/exp_tat_test
 diff -x "public.sql" -qr /tmp/exp_tat_test/schemas/ final_database/schemas && echo " all tables: ok"
+diff -qr /tmp/exp_tat_test/publications final_database/publications && echo " publications: ok"
 echo
 echo "check sum:"
 psql -t -c "select 'analytics.page: ' ||
