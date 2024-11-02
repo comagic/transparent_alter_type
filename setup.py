@@ -7,7 +7,7 @@ PACKAGE_TYPE = 'pg-tools'
 PACKAGE_NAME = 'transparent-alter-type'
 PACKAGE_DESC = 'alter type of column without long locks'
 PACKAGE_LONG_DESC = ''
-PACKAGE_VERSION = '3.0.0'
+PACKAGE_VERSION = '3.0.1'
 
 
 class PyTest(TestCommand):

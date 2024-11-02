@@ -1,4 +1,4 @@
-!/bin/bash
+#!/bin/bash
 
 export PGPASSWORD=123456
 export PGUSER=postgres
@@ -6,6 +6,8 @@ export PGHOST=0.0.0.0
 export PGPORT=5432
 export PGDATABASE=tat_test
 PG_VERSION=15
+
+docker rm -f pg_tat_test
 
 set -e
 
@@ -25,7 +27,7 @@ psql -c "insert into analytics.page(url)
 
 transparent_alter_type -t analytics.page -c "id:bigint" -j 4 &
 
-sleep 1  # the following 3 commands will be executed in parallel with transparent_alter_type
+sleep 1.1  # the following 3 commands will be executed in parallel with transparent_alter_type
 psql -c "update analytics.page
             set url = url + 20
           where id between 20 and 30"
@@ -112,5 +114,3 @@ psql -t -c "select 'analytics.hit: ' ||
 #              from analytics.session"
 #psql -t -c "select count(1), sum(duration)
 #              from analytics.hit"
-
-docker rm -f pg_tat_test > /dev/null

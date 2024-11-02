@@ -28,7 +28,8 @@ select tn.table_name as name,
        attach.attach_expr,
        fattach.attach_foreign_expr,
        fdetach.detach_foreign_expr,
-       part.partition_expr
+       part.partition_expr,
+       ri.replica_identity
   from pg_class t
  cross join lateral (select t.oid::regclass::text as table_name) tn
   left join lateral (select format('comment on table %s__tat_new is %L;',
@@ -261,4 +262,21 @@ select tn.table_name as name,
                        from pg_partitioned_table p
                       where p.partrelid = t.oid) part
          on true
+  left join format('alter table %s replica identity %s',
+                    t.oid::regclass,
+                    case t.relreplident
+                      when 'f'
+                        then 'full'
+                      when 'n'
+                        then 'nothing'
+                      when 'i'
+                        then format('using index %I',
+                                    (select cr.relname
+                                       from pg_index ir
+                                      inner join pg_class cr
+                                              on cr.oid = ir.indexrelid
+                                      where ir.indrelid = t.oid and
+                                            ir.indisreplident))
+                    end) as ri(replica_identity)
+         on t.relreplident in ('f', 'n', 'i')
  where t.oid = any($1::regclass[])

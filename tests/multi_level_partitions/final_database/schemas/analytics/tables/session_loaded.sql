@@ -15,3 +15,5 @@ alter table analytics.session_loaded add constraint fk_session__page
   foreign key (page_id) references analytics.page(id);
 
 create index idx_session_loaded on analytics.session_loaded(ts);
+
+alter table analytics.session_loaded replica identity nothing;

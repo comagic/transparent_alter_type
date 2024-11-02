@@ -15,3 +15,5 @@ alter table analytics.session_2024_02 add constraint fk_session__page
   foreign key (page_id) references analytics.page(id);
 
 create index idx_session_2024_02 on analytics.session_2024_02(ts);
+
+alter table analytics.session_2024_02 replica identity using index pk_session_2024_02;
