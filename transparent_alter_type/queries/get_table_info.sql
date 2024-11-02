@@ -6,6 +6,7 @@ select tn.table_name as name,
        att.all_columns,
        att.column_types,
        pk.pk_columns,
+       pk.pk_types,
        d.comment,
        i.create_indexes,
        i.rename_indexes,
@@ -60,6 +61,7 @@ select tn.table_name as name,
                             ic.relname not like '%\_tat') i
   left join lateral (select uni.contype,
                             array_agg(a.attname order by a.attnum) filter (where a.attnotnull) as pk_columns,
+                            array_agg(a.atttypid::regtype::text order by a.attnum) filter (where a.attnotnull) as pk_types,
                             count(1)
                        from pg_constraint uni
                       inner join pg_attribute a
@@ -70,7 +72,8 @@ select tn.table_name as name,
                       group by 1
                      having cardinality(array_agg(a.attname order by a.attnum) filter (where a.attnotnull)) = count(1) --only all not null columns
                       order by 3
-                      limit 1) as pk on true
+                      limit 1) as pk
+         on true
  cross join lateral (select coalesce(array_agg(format(
                                                  'alter table %s add constraint %s %s using index %s %s %s;',
                                                  tn.table_name,

@@ -23,6 +23,7 @@ def main():
     arg_parser.add_argument('--min-delta-rows', type=int, default=10000)
     arg_parser.add_argument('--skip-fk-validation', action='store_true')
     arg_parser.add_argument('--show-queries', action='store_true')
+    arg_parser.add_argument('--batch-size', type=int, default=0)
     args = arg_parser.parse_args()
 
     t = TAT(args)

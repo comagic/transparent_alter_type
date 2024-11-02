@@ -12,6 +12,7 @@ from typing import List
 import asyncpg
 from pg_export.acl import acl_to_grants
 
+from .data_copier import DataCopier
 from .pg_pool import PgPool
 
 
@@ -44,7 +45,8 @@ class TAT:
     def log(self, message):
         print(f'{self.table_name}: {message}')
 
-    def log_border(self):
+    @staticmethod
+    def log_border():
         print('-' * 50)
 
     async def cancel_autovacuum(self, con=None):
@@ -228,20 +230,13 @@ class TAT:
         self.log_border()
         tasks = []
         if self.table_kind == TableKind.regular:
-            tasks.append(self.copy_table())
+            copier = DataCopier(self.args, self.table, self.db)
+            tasks.append(copier.copy_data())
         for child in self.children:
             if child.table_kind == TableKind.regular:
-                tasks.append(child.copy_table())
+                copier = DataCopier(child.args, child.table, child.db)
+                tasks.append(copier.copy_data())
         await self.run_parallel(tasks, self.args.jobs)
-
-    async def copy_table(self):
-        ts = time.time()
-        self.log(f'copy data: start ({self.table["pretty_data_size"]})')
-        await self.db.execute(f'''
-            insert into {self.table_name}__tat_new
-              select * from only {self.table_name}
-        ''')
-        self.log(f'copy data: done ({self.table["pretty_data_size"]}) in {self.duration(ts)}')
 
     async def create_indexes(self):
         ts = time.time()
