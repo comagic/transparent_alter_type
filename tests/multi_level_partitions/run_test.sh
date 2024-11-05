@@ -29,7 +29,7 @@ psql -c "insert into analytics.communication(id, type, duration)
           cross join unnest(enum_range(null::analytics.communication_type_mnemonic)) as type"
 
 # batch mode multi column primary key
-transparent_alter_type -t analytics.communication -c "id:bigint" --batch-size 100000 &
+transparent_alter_type -t analytics.communication -c "id:bigint" --copy-data-jobs 2 --create-index-jobs 4 --batch-size 100000 &
 
 sleep 1.1  # the following 3 commands will be executed in parallel with transparent_alter_type
 psql -c "update analytics.communication
@@ -48,7 +48,7 @@ psql -c "insert into analytics.page(url)
          select generate_series(1, 1000000)"
 
 # batch mode single column primary key
-transparent_alter_type -t analytics.page -c "id:bigint" -j 4 --batch-size 100000 &
+transparent_alter_type -t analytics.page -c "id:bigint" --copy-data-jobs 2 --create-index-jobs 4 --batch-size 100000 &
 
 sleep 1.1  # the following 3 commands will be executed in parallel with transparent_alter_type
 psql -c "update analytics.page
@@ -66,7 +66,7 @@ psql -c "insert into analytics.session(page_id, ts, is_loaded, duration)
            from generate_series(1, 1000000) i"
 
 # declarative partitioning
-transparent_alter_type -t analytics.session -c "id:bigint" -c "page_id:bigint" -j 4 &
+transparent_alter_type -t analytics.session -c "id:bigint" -c "page_id:bigint" --copy-data-jobs 2 --create-index-jobs 4 &
 
 sleep 1  # the following 3 commands will be executed in parallel with transparent_alter_type
 psql -c "update analytics.session
@@ -88,7 +88,7 @@ psql -c "insert into analytics.hit_2024_01(session_id, ts, duration)
            from generate_series(1, 1000000) i"
 
 # old style inheritance partitioning
-transparent_alter_type -t analytics.hit -c "id:bigint" -c "session_id:bigint" -j 4 &
+transparent_alter_type -t analytics.hit -c "id:bigint" -c "session_id:bigint" --copy-data-jobs 2 --create-index-jobs 4 &
 
 sleep 1  # the following 3 commands will be executed in parallel with transparent_alter_type
 psql -c "update analytics.hit

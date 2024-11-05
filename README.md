@@ -14,7 +14,8 @@ $ pip install transparent-alter-type
 # Usage
 
     usage: transparent_alter_type [--help] -t TABLE_NAME [-c COLUMN] [-h HOST] [-d DBNAME]
-                              [-U USER] [-W PASSWORD] [-p PORT] [-j JOBS] [--force]
+                              [-U USER] [-W PASSWORD] [-p PORT] [--copy-data-jobs COPY_DATA_JOBS] 
+                              [--create-index-jobs CREATE_INDEX_JOBS] [--force]
                               [--cleanup] [--lock-timeout LOCK_TIMEOUT]
                               [--time-between-locks TIME_BETWEEN_LOCKS]
                               [--work-mem WORK_MEM] [--min-delta-rows MIN_DELTA_ROWS]

@@ -236,7 +236,7 @@ class TAT:
             if child.table_kind == TableKind.regular:
                 copier = DataCopier(child.args, child.table, child.db)
                 tasks.append(copier.copy_data())
-        await self.run_parallel(tasks, self.args.jobs)
+        await self.run_parallel(tasks, self.args.copy_data_jobs)
 
     async def create_indexes(self):
         ts = time.time()
@@ -250,8 +250,8 @@ class TAT:
         if not tasks:
             return
         self.log_border()
-        self.log(f'create indexes: start ({len(tasks)} indexes on {self.args.jobs} jobs)')
-        await self.run_parallel(tasks, self.args.jobs)
+        self.log(f'create indexes: start ({len(tasks)} indexes on {self.args.create_index_jobs} jobs)')
+        await self.run_parallel(tasks, self.args.create_index_jobs)
         self.log(f'create indexes: done in {self.duration(ts)}')
 
     async def create_index(self, index_def):

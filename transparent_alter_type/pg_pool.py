@@ -67,8 +67,8 @@ class PgPool:
             password=self.args.password,
             host=self.args.host,
             port=self.args.port,
-            min_size=self.args.jobs,
-            max_size=self.args.jobs,
+            min_size=max(self.args.copy_data_jobs, self.args.create_index_jobs),
+            max_size=max(self.args.copy_data_jobs, self.args.create_index_jobs),
             statement_cache_size=0,
             init=init_connection
         )
