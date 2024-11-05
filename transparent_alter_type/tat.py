@@ -221,32 +221,44 @@ class TAT:
     async def run_parallel(tasks, worker_count):
         async def worker():
             while tasks:
-                task = tasks.pop()
+                task = tasks.pop(0)
                 await task
         workers = [worker() for _ in range(worker_count)]
         await asyncio.gather(*workers)
 
     async def copy_data(self):
-        self.log_border()
+        ts = time.time()
+        i = 0
+        size = 0
         tasks = []
         if self.table_kind == TableKind.regular:
+            i += 1
+            size += self.table['data_size']
             copier = DataCopier(self.args, self.table, self.db)
-            tasks.append(copier.copy_data())
+            tasks.append(copier.copy_data(i))
         for child in self.children:
             if child.table_kind == TableKind.regular:
+                i += 1
+                size += child.table['data_size']
                 copier = DataCopier(child.args, child.table, child.db)
-                tasks.append(copier.copy_data())
+                tasks.append(copier.copy_data(i))
+        pretty_size = await self.db.fetchval('select pg_size_pretty($1::bigint)', size)
+        self.log_border()
+        self.log(f'copy data: start ({len(tasks)} tables on {self.args.copy_data_jobs} jobs, size: {pretty_size})')
         await self.run_parallel(tasks, self.args.copy_data_jobs)
+        self.log(f'copy data: done in {self.duration(ts)}')
 
     async def create_indexes(self):
         ts = time.time()
-        tasks = [
-            self.create_index(index_def)
-            for index_def in self.table['create_indexes']
-        ]
+        i = 0
+        tasks = []
+        for index_def in self.table['create_indexes']:
+            i += 1
+            tasks.append(self.create_index(index_def, i))
         for child in self.children:
             for index_def in child.table['create_indexes']:
-                tasks.append(child.create_index(index_def))
+                i += 1
+                tasks.append(child.create_index(index_def, i))
         if not tasks:
             return
         self.log_border()
@@ -254,12 +266,12 @@ class TAT:
         await self.run_parallel(tasks, self.args.create_index_jobs)
         self.log(f'create indexes: done in {self.duration(ts)}')
 
-    async def create_index(self, index_def):
+    async def create_index(self, index_def, i):
         ts = time.time()
         index_name = re.sub('CREATE U?N?I?Q?U?E? ?INDEX (.*) ON .*', '\\1', index_def)
-        self.log(f'create index: {index_name}: start')
+        self.log(f'create index: {index_name}: start ({i})')
         await self.db.execute(index_def)
-        self.log(f'create index: {index_name}: done in {self.duration(ts)}')
+        self.log(f'create index: {index_name}: done ({i}) in {self.duration(ts)}')
 
     async def apply_delta(self, con=None):
         rows = 0

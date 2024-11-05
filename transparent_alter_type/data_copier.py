@@ -19,14 +19,14 @@ class DataCopier:
     def duration(start_time):
         return str(datetime.timedelta(seconds=int(time.time() - start_time)))
 
-    async def copy_data(self):
+    async def copy_data(self, i):
         ts = time.time()
-        self.log(f'copy data: start ({self.table["pretty_data_size"]})')
+        self.log(f'copy data: start ({i}: {self.table["pretty_data_size"]})')
         if self.args.batch_size == 0:
             await self.copy_data_direct()
         else:
             await self.copy_data_batches()
-        self.log(f'copy data: done ({self.table["pretty_data_size"]}) in {self.duration(ts)}')
+        self.log(f'copy data: done ({i}: {self.table["pretty_data_size"]}) in {self.duration(ts)}')
 
     async def copy_data_direct(self):
         await self.db.execute(f'''
